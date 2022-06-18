@@ -2,6 +2,8 @@ use secrecy::Secret;
 use secrecy::ExposeSecret;
 use serde_aux::field_attributes::deserialize_number_from_string;
 use sqlx::postgres::PgConnectOptions;
+use sqlx::postgres::PgSslMode;
+use sqlx::ConnectOptions;
 
 #[derive(serde::Deserialize)]
 pub struct Settings {
@@ -17,6 +19,7 @@ pub struct DatabaseSettings {
     pub port: u16,
     pub host: String,
     pub database_name: String,
+    pub require_ssl: bool,
 }
 
 #[derive(serde::Deserialize)]
@@ -42,7 +45,7 @@ pub fn get_configuration() -> Result<Settings, config::ConfigError> { // Initial
         config::File::from(configuration_directory.join(environment.as_str())).required(true),
     )?;
 
-    settings.merge(config::Environment::with_prefix("app").separator("_"))?;
+    settings.merge(config::Environment::with_prefix("app").separator("__"))?;
 
     // Try to convert the configuration values it read into 
     // our Settings type
@@ -80,15 +83,23 @@ impl TryFrom<String> for Environment {
 
 impl DatabaseSettings {
     pub fn without_db(&self) -> PgConnectOptions {
+        let ssl_mode = if self.require_ssl {
+            PgSslMode::Require
+        } else {
+            PgSslMode::Prefer
+        };
         PgConnectOptions::new()
             .host(&self.host)
             .username(&self.username)
             .password(&self.password.expose_secret())
             .port(self.port)
+            .ssl_mode(ssl_mode)
     }
 
     pub fn with_db(&self) -> PgConnectOptions {
-        self.without_db().database(&self.database_name)
+        let mut options = self.without_db().database(&self.database_name);
+        options.log_statements(tracing::log::LevelFilter::Trace);
+        options
     }
 
 
