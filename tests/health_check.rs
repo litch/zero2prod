@@ -7,6 +7,7 @@ use zero2prod::startup::run;
 use zero2prod::configuration::get_configuration;
 use zero2prod::configuration::DatabaseSettings;
 use zero2prod::telemetry::{get_subscriber, init_subscriber};
+use zero2prod::email_client::EmailClient;
 use uuid::Uuid;
 use once_cell::sync::Lazy;
 use secrecy::ExposeSecret;
@@ -58,6 +59,34 @@ async fn subscribe_returns_a_200_for_valid_form_data() {
     
     assert_eq!(saved.email, "something-something@gmail.com");
     assert_eq!(saved.name, "le something");
+}
+
+#[tokio::test]
+async fn subscribe_returns_a_400_when_fields_are_present_but_invalid() {
+    let app = spawn_app().await;
+    let client = reqwest::Client::new();
+    let test_cases = vec![
+        ("name=&email=ursula_le_guin%40gmail.com", "empty name"),
+        ("name=Ursuluta&email=", "empty email"),
+        ("name=fred&email=something-that-is-not-email", "invalid email"),
+    ];
+
+    for (body, description) in test_cases {
+        let response = client
+            .post(&format!("{}/subscriptions", &app.address))
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .body(body)
+            .send()
+            .await
+            .expect("Failed to execute request");
+
+        assert_eq!(
+            400,
+            response.status().as_u16(),
+            "The API did not return a 200 OK when the payload was {}.", 
+            description
+        )
+    }
 }
 
 #[tokio::test]
@@ -127,11 +156,23 @@ async fn spawn_app() -> TestApp {
     let port = listener.local_addr().unwrap().port();
     let address = format!("http://127.0.0.1:{}", port);
     
-    let mut configuration = get_configuration().expect("Failed to read configuration");
+    let mut configuration = get_configuration()
+        .expect("Failed to read configuration");
     configuration.database.database_name = Uuid::new_v4().to_string();
     let connection_pool = configure_database(&configuration.database).await;
     
-    let server = run(listener, connection_pool.clone()).expect("Failed to bind address");
+    let sender_email = configuration.email_client.sender()
+        .expect("Invalid sender email address");
+    let timeout = configuration.email_client.timeout();
+    let email_client = EmailClient::new(
+        configuration.email_client.base_url,
+        sender_email,
+        configuration.email_client.authorization_token,
+        timeout
+    );
+
+    let server = run(listener, connection_pool.clone(), email_client)
+        .expect("Failed to bind address");
     let _ = tokio::spawn(server);
     
     TestApp {
