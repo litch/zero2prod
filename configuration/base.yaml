@@ -8,6 +8,6 @@ database:
   database_name: "newsletter"
 email_client:
   base_url: "localhost"
-  sender_email: "test@gmail.com"
-  authorization_token: "my-secret-token"
+  sender_email: "justin@lgi.ai"
+  authorization_token: "57030955-eb9c-4730-96a6-8b7e6dbc2863"
   timeout_milliseconds: 10000
